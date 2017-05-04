@@ -45,9 +45,7 @@ void *frame_capture(void *threadid)
 			frame=cvQueryFrame(capture);
         if(!frame) break;
         printf("\ni");
-         Mat mat_frame(frame);
-          imshow("Circles",mat_frame);
-		cvWaitKey(1);
+         
        pthread_mutex_unlock(&pre_processing_mutex);
 	usleep(1000);
 	}
@@ -85,7 +83,7 @@ void *pre_processing(void *threadid)
 	cvWaitKey(1);
 	//sleep(10);
 	}
-	 pthread_mutex_unlock(&capture_mutex);
+	 pthread_mutex_unlock(&ball_detection_mutex);
 		}
 }
 
@@ -93,11 +91,15 @@ void *ball_detection(void *threadid)
 {
 	while(1)
 	{
-	printf("\niii");
+	pthread_mutex_lock(&ball_detection_mutex);
+	
+	if(frame)
+	 {
+	 Mat mat_frame(frame);
+	 	printf("\niii");	
 	HoughCircles(mask, circles, CV_HOUGH_GRADIENT, 1, mask.rows/8, 15, 15, 10, 0);
 
 	
-	Mat mat_frame(frame);
 	
 	 for( size_t i = 0; i < circles.size(); i++ )
         {
@@ -109,9 +111,11 @@ void *ball_detection(void *threadid)
 		   break;
           
         }
-      //  imshow("Circles",mat_frame);
+        imshow("Circles",mat_frame);
 		cvWaitKey(1);
-        sleep(200);
+		}
+		pthread_mutex_unlock(&capture_mutex);
+        usleep(200);
 	}
 }
 
@@ -201,11 +205,11 @@ int main( int argc, char** argv )
       printf("ERROR; pre_processing pthread_create() rc is %d\n", rc); perror(NULL); exit(-1);
     }
 
-  /*  rc = pthread_create(&ball_detection_thread, &ball_detection_sched_attr,ball_detection, NULL);
+   rc = pthread_create(&ball_detection_thread, &ball_detection_sched_attr,ball_detection, NULL);
    if (rc)
     {
       printf("ERROR; ball_detection pthread_create() rc is %d\n", rc); perror(NULL); exit(-1);
-    }*/
+    }
 
 	
 
