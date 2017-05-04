@@ -43,11 +43,7 @@ int main( int argc, char** argv )
         if(!frame) break;
   	
         
-       clock_gettime(CLOCK_REALTIME, &frame_time_start);
-                prev_frame_time =((double)frame_time_start.tv_sec * 1000.0) + 
-                                ((double)((double)frame_time_start.tv_nsec / 1000000.0));
-                frame_count ++;
-      
+       
 	
        
 
@@ -67,9 +63,16 @@ int main( int argc, char** argv )
    	GaussianBlur(mask,mask,Size(11,11),0,0);
 	//imshow("Thr1",thr1);
 	//imshow("Thr2",thr2);
-		clock_gettime(CLOCK_REALTIME, &frame_time_stop);
+		
+	
+	
+	
+	clock_gettime(CLOCK_REALTIME, &frame_time_start);
+                prev_frame_time =((double)frame_time_start.tv_sec * 1000.0) + 
+                                ((double)((double)frame_time_start.tv_nsec / 1000000.0));
+                frame_count ++;
+      
 	imshow("Mask",mask);
-
 	HoughCircles(mask, circles, CV_HOUGH_GRADIENT, 1, mask.rows/8, 15, 15, 15, 0);
 
 	
@@ -86,7 +89,7 @@ int main( int argc, char** argv )
           
         }
 	
-	
+	clock_gettime(CLOCK_REALTIME, &frame_time_stop);
 	curr_frame_time =((double)frame_time_stop.tv_sec * 1000.0) + 
                                 ((double)((double)frame_time_stop.tv_nsec / 1000000.0));
         
@@ -98,7 +101,7 @@ int main( int argc, char** argv )
 
 	 }
 	
-	printf("\n\n Backgound - Frame %d Time - %lf Avg Frame Time=%5.2lf msec, Ave Frame Rate - %5.2lf fps  WCET - %5.2lf \n", 
+	printf("\n\n Circle - Frame %d Time - %lf Avg Frame Time=%5.2lf msec, Ave Frame Rate - %5.2lf fps  WCET - %5.2lf \n", 
                  frame_count  ,framedt , ave_framedt ,ave_frame_rate,wcet );
 
         if(framedt >wcet && frame_count>50) wcet =framedt ;
