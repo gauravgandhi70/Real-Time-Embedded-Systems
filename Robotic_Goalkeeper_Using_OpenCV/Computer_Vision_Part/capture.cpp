@@ -37,13 +37,19 @@ int main( int argc, char** argv )
 
     while(1)
     {
-	   
+	
+	
+	clock_gettime(CLOCK_REALTIME, &frame_time_start);
+                prev_frame_time =((double)frame_time_start.tv_sec * 1000.0) + 
+                                ((double)((double)frame_time_start.tv_nsec / 1000000.0));
+                frame_count ++;
+       
         frame=cvQueryFrame(capture);
      
         if(!frame) break;
   	
         
-       
+    clock_gettime(CLOCK_REALTIME, &frame_time_stop);   
 	
        
 
@@ -67,11 +73,7 @@ int main( int argc, char** argv )
 	
 	
 	
-	clock_gettime(CLOCK_REALTIME, &frame_time_start);
-                prev_frame_time =((double)frame_time_start.tv_sec * 1000.0) + 
-                                ((double)((double)frame_time_start.tv_nsec / 1000000.0));
-                frame_count ++;
-      
+	  
 	imshow("Mask",mask);
 	HoughCircles(mask, circles, CV_HOUGH_GRADIENT, 1, mask.rows/8, 15, 15, 15, 0);
 
@@ -89,7 +91,7 @@ int main( int argc, char** argv )
           
         }
 	
-	clock_gettime(CLOCK_REALTIME, &frame_time_stop);
+	
 	curr_frame_time =((double)frame_time_stop.tv_sec * 1000.0) + 
                                 ((double)((double)frame_time_stop.tv_nsec / 1000000.0));
         
