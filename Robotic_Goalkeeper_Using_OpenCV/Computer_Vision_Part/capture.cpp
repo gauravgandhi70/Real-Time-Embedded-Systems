@@ -13,7 +13,7 @@ Mat hsv1,thr1,thr2,mask,mat_frame;
     IplImage* frame;
 	vector<Vec3f> circles;
 	int i=0;
-	CvCapture* capture = cvCreateCameraCapture(1);	
+	CvCapture* capture = cvCreateCameraCapture(0);	
 double wcet=0;
 
 pthread_t capture_thread, pre_processing_thread, ball_detection_thread, scheduler_thread;
@@ -47,8 +47,9 @@ void *frame_capture(void *threadid)
         printf("\ni");
          
        pthread_mutex_unlock(&pre_processing_mutex);
-	usleep(1000);
+	//sleep(1000);
 	}
+	
 
 }
 void *pre_processing(void *threadid)
@@ -161,7 +162,7 @@ int main( int argc, char** argv )
   pthread_attr_setinheritsched (&capture_sched_attr, PTHREAD_EXPLICIT_SCHED);
   pthread_attr_setschedpolicy (&capture_sched_attr, SCHED_FIFO);
     capture_param.sched_priority = rt_max_prio-1;	
-	//rc=sched_setscheduler(getpid(), SCHED_FIFO, &capture_param);
+	rc=sched_setscheduler(getpid(), SCHED_FIFO, &capture_param);
 	
    pthread_attr_setschedparam(&capture_sched_attr,&capture_param);
   
@@ -170,7 +171,7 @@ int main( int argc, char** argv )
   pthread_attr_setinheritsched (&pre_processing_sched_attr, PTHREAD_EXPLICIT_SCHED);
   pthread_attr_setschedpolicy (&pre_processing_sched_attr, SCHED_FIFO);
     pre_processing_param.sched_priority = rt_max_prio-2;
-	//rc=sched_setscheduler(getpid(), SCHED_FIFO, &pre_processing_param);
+	rc=sched_setscheduler(getpid(), SCHED_FIFO, &pre_processing_param);
 	
     pthread_attr_setschedparam (&pre_processing_sched_attr,&pre_processing_param);
   
