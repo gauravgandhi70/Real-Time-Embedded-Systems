@@ -35,7 +35,7 @@ using namespace std;
 #define CLAW                          7
 
 #define BAUDRATE                        1000000
-#define DEVICENAME                      "/dev/ttyUSB1"      // Check which port is being used on your controller
+#define DEVICENAME                      "/dev/ttyUSB0"      // Check which port is being used on your controller
                                                             // ex) Windows: "COM1"   Linux: "/dev/ttyUSB0"
 
 #define TORQUE_ENABLE                   1                   // Value for enabling the torque
@@ -58,8 +58,9 @@ using namespace std;
 	int upper_arm = UPPER_ARM_POS; // keep the arm flexed initially
 	int wrist = WRIST_POS; //Initial wrist motor position
 	int claw = CLAW_POS; //keep the claw open initially
-	dynamixel::PortHandler *portHandler;
-	dynamixel::PacketHandler *packetHandler;
+	
+	// Get methods and members of PortHandlerLinux or PortHandlerWindows
+
 
 /*****************************************************************************************************************************************/
 // Variables for frame capture and processing
@@ -71,9 +72,6 @@ CvCapture* capture = cvCreateCameraCapture(0);
 double wcet=0;
 Scalar hsv_min1,hsv_max1, hsv_min2,hsv_max2;
 
-uint8_t dxl_error = 0;                          // Dynamixel error variable
-
-int dxl_comm_result = COMM_TX_FAIL;             // Communication result
 
 
 // Variables for thread creation and Mutexes
@@ -144,9 +142,119 @@ int kbhit(void)
 #endif
 }
 
-int init_motors(void){
 
- if (portHandler->openPort())
+/*********************************************************************************************************************************************/
+// New frame capture Thread
+void *frame_capture(void *threadid)
+{
+	  	
+	while(1)
+	{
+	// Capturing new frame with mutex protection
+		pthread_mutex_lock(&capture_mutex);
+			frame=cvQueryFrame(capture);
+        if(!frame) break;
+        printf("\ni");
+         
+       pthread_mutex_unlock(&pre_processing_mutex);
+	//usleep(150000);
+	}
+}
+
+
+// Frame pre processing (Noise Reduction , background substraction) thread
+void *pre_processing(void *threadid)
+{
+	while(1)
+	{
+	pthread_mutex_lock(&pre_processing_mutex);
+	// If frame is not captures then dont proceed
+	if(frame)
+	 {
+	 // Convert frame into matrix
+	 
+	 Mat mat_frame(frame);
+	 	printf("\nii");		// Thread 2
+	 	
+	 	// Convert BGR image into HSV format
+	cvtColor(mat_frame,hsv1,COLOR_BGR2HSV);
+	
+	// Providing threasholds for Colour detection filter to detect green ball
+	hsv_min1 = Scalar(35, 50, 100); // Filter 1
+	hsv_max1 = Scalar(65, 210,255);
+	hsv_min2 = Scalar(35, 50, 50); // Filter 2
+	hsv_max2 = Scalar(65, 100, 100);	
+
+	//Apply the Filters
+	inRange(hsv1,hsv_min1,hsv_max1,thr1);	// Detect Bright green
+	inRange(hsv1,hsv_min2,hsv_max2,thr2);   // Detect Dark Green
+	
+	
+	add(thr1,thr2,mask);		// Add 2 filtered images
+	 
+   	GaussianBlur(mask,mask,Size(11,11),0,0); // Blur the images to reduce the noise
+	
+	imshow("Mask",mask);
+	cvWaitKey(1);
+	}
+	 pthread_mutex_unlock(&ball_detection_mutex);
+		}
+}
+
+// Ball Detection and Center Detection using Hough circle Transform
+void *ball_detection(void *threadid)
+{
+	while(1)
+	{
+	pthread_mutex_lock(&ball_detection_mutex);
+	
+	if(frame)
+	 {
+	 // Get frame into Matrix
+	 Mat mat_frame(frame);
+	 	printf("\niii");	// Thread number 3
+	 	// Function for detecting circles from the filtered image
+	HoughCircles(mask, circles, CV_HOUGH_GRADIENT, 1, mask.rows/8, 15, 15, 10, 0);
+
+	
+		// Get the center of the image
+	 for( size_t i = 0; i < circles.size(); i++ )
+        {
+          Point center(cvRound(circles[i][0]), cvRound(circles[i][1]));
+          int radius = cvRound(circles[i][2]);
+          // circle center
+          x_coordinate = cvRound(circles[i][0]);
+          circle( mat_frame, center, 3, Scalar(0,0,255), -1, 8, 0 );
+          //printf("\n C %lf %lf %lf %d",circles[0][0], circles[0][1],circles[0][2],i);
+		   break;
+          
+        }
+        imshow("Circles",mat_frame);
+		cvWaitKey(1);
+		}
+		
+		pthread_mutex_unlock(&arm_mutex);
+				//pthread_mutex_unlock(&capture_mutex);
+	
+        
+	}
+}
+
+// Ball Speed Detection and arm actuation thread
+
+void *arm_actuation(void *threadid)
+{
+		// Initialize PortHandler Structs
+	// Set the port path
+			dynamixel::PortHandler *portHandler = dynamixel::PortHandler::getPortHandler(DEVICENAME);
+
+	// Initialize PacketHandler Structs
+	dynamixel::PacketHandler *packetHandler = dynamixel::PacketHandler::getPacketHandler(PROTOCOL_VERSION);
+	
+	uint8_t dxl_error = 0;                          // Dynamixel error variable
+
+int dxl_comm_result = COMM_TX_FAIL;             // Communication result
+	if (portHandler->openPort())
   {
     printf("Succeeded to open the port!\n");
   }
@@ -246,127 +354,16 @@ int init_motors(void){
 	packetHandler->write2ByteTxRx(portHandler, WRIST, ADDR_MX_GOAL_POSITION, wrist, &dxl_error);
 	packetHandler->write2ByteTxRx(portHandler, CLAW, ADDR_MX_GOAL_POSITION, claw, &dxl_error);
 	
-}
 
-/*********************************************************************************************************************************************/
-// New frame capture Thread
-void *frame_capture(void *threadid)
-{
-	  	
-	while(1)
-	{
-	// Capturing new frame with mutex protection
-		pthread_mutex_lock(&capture_mutex);
-			frame=cvQueryFrame(capture);
-        if(!frame) break;
-        printf("\ni");
-         
-       pthread_mutex_unlock(&pre_processing_mutex);
-	usleep(150000);
-	}
-	
-
-}
-
-
-// Frame pre processing (Noise Reduction , background substraction) thread
-void *pre_processing(void *threadid)
-{
-	while(1)
-	{
-	pthread_mutex_lock(&pre_processing_mutex);
-	// If frame is not captures then dont proceed
-	if(frame)
-	 {
-	 // Convert frame into matrix
-	 
-	 Mat mat_frame(frame);
-	 	printf("\nii");		// Thread 2
-	 	
-	 	// Convert BGR image into HSV format
-	cvtColor(mat_frame,hsv1,COLOR_BGR2HSV);
-	
-	// Providing threasholds for Colour detection filter to detect green ball
-	hsv_min1 = Scalar(35, 50, 100); // Filter 1
-	hsv_max1 = Scalar(65, 210,255);
-	hsv_min2 = Scalar(35, 50, 50); // Filter 2
-	hsv_max2 = Scalar(65, 100, 100);	
-
-	//Apply the Filters
-	inRange(hsv1,hsv_min1,hsv_max1,thr1);	// Detect Bright green
-	inRange(hsv1,hsv_min2,hsv_max2,thr2);   // Detect Dark Green
-	
-	
-	add(thr1,thr2,mask);		// Add 2 filtered images
-	 
-   	GaussianBlur(mask,mask,Size(11,11),0,0); // Blur the images to reduce the noise
-	
-	imshow("Mask",mask);
-	cvWaitKey(1);
-	}
-	 pthread_mutex_unlock(&ball_detection_mutex);
-		}
-}
-
-// Ball Detection and Center Detection using Hough circle Transform
-void *ball_detection(void *threadid)
-{
-	while(1)
-	{
-	pthread_mutex_lock(&ball_detection_mutex);
-	
-	if(frame)
-	 {
-	 // Get frame into Matrix
-	 Mat mat_frame(frame);
-	 	printf("\niii");	// Thread number 3
-	 	// Function for detecting circles from the filtered image
-	HoughCircles(mask, circles, CV_HOUGH_GRADIENT, 1, mask.rows/8, 15, 15, 10, 0);
-
-	
-		// Get the center of the image
-	 for( size_t i = 0; i < circles.size(); i++ )
-        {
-          Point center(cvRound(circles[i][0]), cvRound(circles[i][1]));
-          int radius = cvRound(circles[i][2]);
-          // circle center
-          x_coordinate = circles[i][0];
-          circle( mat_frame, center, 3, Scalar(0,0,255), -1, 8, 0 );
-          //printf("\n C %lf %lf %lf %d",circles[0][0], circles[0][1],circles[0][2],i);
-		   break;
-          
-        }
-        imshow("Circles",mat_frame);
-		cvWaitKey(1);
-		}
-		
-		pthread_mutex_unlock(&arm_mutex);
-        
-	}
-}
-
-// Ball Speed Detection and arm actuation thread
-
-void *arm_actuation(void *threadid)
-{
-		// Initialize PortHandler Structs
-	// Set the port path
-	// Get methods and members of PortHandlerLinux or PortHandlerWindows
-	dynamixel::PortHandler *portHandler = dynamixel::PortHandler::getPortHandler(DEVICENAME);
-
-	// Initialize PacketHandler Structs
-	dynamixel::PacketHandler *packetHandler = dynamixel::PacketHandler::getPacketHandler(PROTOCOL_VERSION);
-	
-	
-
+		printf("\n4");
 	
 				while(1)
 				{
 					pthread_mutex_lock(&arm_mutex);
-        
-    	      		if(x_coordinate > 370 && x_coordinate < 640)//Detection of the ball in the second half of the frame
+        			printf("\niv");
+    	      		if(x_coordinate > 360 && x_coordinate < 640)//Detection of the ball in the second half of the frame
     	      			{
-    	      				base = (int)(base + (370 - x_coordinate)/7);//Equation for the movement of arm when ball is detected in the 
+    	      				base = base = (int)(base + (370 - circles[0][0])/7) ;//Equation for the movement of arm when ball is detected in the 
     	      																//second half of the frame
     	      			
     	      				if (base <270)
@@ -377,9 +374,9 @@ void *arm_actuation(void *threadid)
     	      		
     	      			
     	      		
-    	      		else if(x_coordinate > 30 && x_coordinate < 320)//Equation for detection of the ball in the second part of the frame
+    	      		else if(x_coordinate > 0 && x_coordinate < 270)//Equation for detection of the ball in the second part of the frame
     	      		{
-    	      			base = (int)(base + (320 - x_coordinate)/5);
+    	      			base = (int)(base + (320 - circles[0][0])/7);
     	      			if (base >710)
     	      				base = 710;//Prevent the overshoot of the Arm.
     	      				printf("\nNO");
@@ -387,17 +384,19 @@ void *arm_actuation(void *threadid)
     	      		}
     	      		  
     	      		
-    	      	else 	{printf("\nYES");}
+    	      //	else 	{printf("\nYES");}
     	      	
-    	      radius  = cvRound(circles[i][2]);
     	      
     	      
-    	      printf("\n Center %f Radius %f Base %d Offset %d",circles[0][0],circles[0][2],base, (int)(FRAME_CENTRE - circles[i][0]));// Print the centre of the circle and the offset for the motor on the console.
-			   pthread_mutex_unlock(&capture_mutex);
+    	      
+    	      //printf("\n Center %f Radius %f Base %d Offset %d",circles[0][0],circles[0][2],base, (int)(FRAME_CENTRE - circles[i][0]));// Print the centre of the circle and the offset for the motor on the console.
+			   
+  		packetHandler->write2ByteTxRx(portHandler, BASE, ADDR_MX_GOAL_POSITION, base, &dxl_error);//move the base motor
+		pthread_mutex_unlock(&capture_mutex);
         
-   packetHandler->write2ByteTxRx(portHandler, BASE, ADDR_MX_GOAL_POSITION, base, &dxl_error);//move the base motor
-		
         }
+        
+        
 }
 
 void print_scheduler(void)
@@ -431,15 +430,13 @@ int main( int argc, char** argv )
   	rt_min_prio = sched_get_priority_min (SCHED_FIFO);
 	
     
-	//Initialization of Robotic ARM
-	init_motors();
 	
 	// Initializing all the thread attributes
 	pthread_attr_init (&capture_sched_attr);
   pthread_attr_setinheritsched (&capture_sched_attr, PTHREAD_EXPLICIT_SCHED);
   pthread_attr_setschedpolicy (&capture_sched_attr, SCHED_FIFO);
     capture_param.sched_priority = rt_max_prio-1;	
-	rc=sched_setscheduler(getpid(), SCHED_FIFO, &capture_param);
+	//rc=sched_setscheduler(getpid(), SCHED_FIFO, &capture_param);
 	
    pthread_attr_setschedparam(&capture_sched_attr,&capture_param);
   
@@ -448,7 +445,7 @@ int main( int argc, char** argv )
   pthread_attr_setinheritsched (&pre_processing_sched_attr, PTHREAD_EXPLICIT_SCHED);
   pthread_attr_setschedpolicy (&pre_processing_sched_attr, SCHED_FIFO);
     pre_processing_param.sched_priority = rt_max_prio-2;
-	rc=sched_setscheduler(getpid(), SCHED_FIFO, &pre_processing_param);
+	//rc=sched_setscheduler(getpid(), SCHED_FIFO, &pre_processing_param);
 	
     pthread_attr_setschedparam (&pre_processing_sched_attr,&pre_processing_param);
   
@@ -457,7 +454,7 @@ int main( int argc, char** argv )
   pthread_attr_setinheritsched (&ball_detection_sched_attr, PTHREAD_EXPLICIT_SCHED);
   pthread_attr_setschedpolicy (&ball_detection_sched_attr, SCHED_FIFO);
 		ball_detection_param.sched_priority = rt_max_prio-3;
-	rc=sched_setscheduler(getpid(), SCHED_FIFO, &ball_detection_param);
+	//rc=sched_setscheduler(getpid(), SCHED_FIFO, &ball_detection_param);
 	
     pthread_attr_setschedparam(&ball_detection_sched_attr,&ball_detection_param);
 
@@ -466,7 +463,7 @@ int main( int argc, char** argv )
    pthread_attr_setinheritsched (&arm_act_attr, PTHREAD_EXPLICIT_SCHED);
    pthread_attr_setschedpolicy (&arm_act_attr, SCHED_FIFO);
 		arm_act_param.sched_priority = rt_max_prio-4;
-	rc=sched_setscheduler(getpid(), SCHED_FIFO, &arm_act_param);
+	//rc=sched_setscheduler(getpid(), SCHED_FIFO, &arm_act_param);
 	
     pthread_attr_setschedparam(&arm_act_attr,&arm_act_param);
     
@@ -490,17 +487,29 @@ int main( int argc, char** argv )
     {
       printf("ERROR; pre_processing pthread_create() rc is %d\n", rc); perror(NULL); exit(-1);
     }
+     else
+    {
+    	printf("pro spawn");
+    }
 
    rc = pthread_create(&ball_detection_thread, &ball_detection_sched_attr,ball_detection, NULL);
    if (rc)
     {
       printf("ERROR; ball_detection pthread_create() rc is %d\n", rc); perror(NULL); exit(-1);
     }
+     else
+    {
+    	printf("ball spawn");
+    }
 
-	 rc = pthread_create(&arm_act_thread, &arm_act_attr,arm_actuation, NULL);
+	rc = pthread_create(&arm_act_thread, &arm_act_attr,arm_actuation, NULL);
    if (rc)
     {
       printf("ERROR; ball_detection pthread_create() rc is %d\n", rc); perror(NULL); exit(-1);
+    }
+     else
+    {
+    	printf("arm spawn");
     }
 
 
