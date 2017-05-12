@@ -43,7 +43,7 @@ FORMAT      =
 #---------------------------------------------------------------------
 INCLUDES   += -I$(DIR_DXL)/include
 LIBRARIES  += -ldxl_x64_cpp -lpthread
-LIBRARIES  += -lrt `pkg-config --libs opencv` -L/usr/lib -lopencv_core -lopencv_flann -lopencv_video
+LIBRARIES  += -lrt `pkg-config --libs opencv` -L/usr/lib -lopencv_core -lopencv_flann -lopencv_video `pkg-config --cflags --libs gstreamer-1.0`
 
 #---------------------------------------------------------------------
 # Files
@@ -73,7 +73,7 @@ $(DIR_OBJS)/%.o: %.c
 	$(CC) $(CCFLAGS) -c $? -o $@
 
 $(DIR_OBJS)/%.o: %.cpp
-	$(CX) $(CXFLAGS) -c $? -o $@
+	$(CX) $(CXFLAGS) -c $? -o $@ $(LIBRARIES)
 
 #---------------------------------------------------------------------
 # End of Makefile

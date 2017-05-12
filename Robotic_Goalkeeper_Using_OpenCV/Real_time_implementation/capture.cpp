@@ -6,13 +6,25 @@
 #include <fcntl.h>
 #include <termios.h>
 #include "dynamixel_sdk.h"
+#include <sched.h>
+#include <sys/sysinfo.h>
 
+
+#include <gst/gst.h>
+#include <glib.h>
 #include <opencv2/core/core.hpp>
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
 
 using namespace cv;
 using namespace std;
+
+
+/*******************************************/
+pthread_t streaming_thread;
+pthread_attr_t streaming_sched_attr;
+struct sched_param streaming_param;
+/*******************************************/
 
 /*************************************************Defines for Robotic ARM****************************************/
 // Control table address
@@ -154,7 +166,7 @@ void *frame_capture(void *threadid)
 		pthread_mutex_lock(&capture_mutex);
 			frame=cvQueryFrame(capture);
         if(!frame) break;
-        printf("\ni");
+        //printf("\ni");
          
        pthread_mutex_unlock(&pre_processing_mutex);
 	//usleep(150000);
@@ -174,7 +186,7 @@ void *pre_processing(void *threadid)
 	 // Convert frame into matrix
 	 
 	 Mat mat_frame(frame);
-	 	printf("\nii");		// Thread 2
+	 	//printf("\nii");		// Thread 2
 	 	
 	 	// Convert BGR image into HSV format
 	cvtColor(mat_frame,hsv1,COLOR_BGR2HSV);
@@ -212,7 +224,7 @@ void *ball_detection(void *threadid)
 	 {
 	 // Get frame into Matrix
 	 Mat mat_frame(frame);
-	 	printf("\niii");	// Thread number 3
+	 	//printf("\niii");	// Thread number 3
 	 	// Function for detecting circles from the filtered image
 	HoughCircles(mask, circles, CV_HOUGH_GRADIENT, 1, mask.rows/8, 15, 15, 10, 0);
 
@@ -221,9 +233,11 @@ void *ball_detection(void *threadid)
 	 for( size_t i = 0; i < circles.size(); i++ )
         {
           Point center(cvRound(circles[i][0]), cvRound(circles[i][1]));
-          int radius = cvRound(circles[i][2]);
+          //int radius = cvRound(circles[i][2]);
           // circle center
-          x_coordinate = cvRound(circles[i][0]);
+          if(circles[i][0]< (FRAME_CENTRE - 40) || circles[i][0]> (FRAME_CENTRE +40)){
+          	x_coordinate = cvRound(circles[i][0]);
+          	}
           circle( mat_frame, center, 3, Scalar(0,0,255), -1, 8, 0 );
           //printf("\n C %lf %lf %lf %d",circles[0][0], circles[0][1],circles[0][2],i);
 		   break;
@@ -360,15 +374,15 @@ int dxl_comm_result = COMM_TX_FAIL;             // Communication result
 				while(1)
 				{
 					pthread_mutex_lock(&arm_mutex);
-        			printf("\niv");
-    	      		if(x_coordinate > 360 && x_coordinate < 640)//Detection of the ball in the second half of the frame
+        			//printf("\niv");
+    	      		if(x_coordinate > 380 && x_coordinate < 640)//Detection of the ball in the second half of the frame
     	      			{
     	      				base = base = (int)(base + (370 - circles[0][0])/7) ;//Equation for the movement of arm when ball is detected in the 
     	      																//second half of the frame
     	      			
     	      				if (base <270)
     	      				base = 270;//Prevent the overshoot of the Arm.
-    	      				printf("\nNO");
+    	      				//printf("\nNO");
     	      	
     	      			}
     	      		
@@ -379,7 +393,7 @@ int dxl_comm_result = COMM_TX_FAIL;             // Communication result
     	      			base = (int)(base + (320 - circles[0][0])/7);
     	      			if (base >710)
     	      				base = 710;//Prevent the overshoot of the Arm.
-    	      				printf("\nNO");
+    	      			//printf("\nNO");
     	      	
     	      		}
     	      		  
@@ -424,7 +438,12 @@ void print_scheduler(void)
 
 int main( int argc, char** argv )
 {
-    
+    int i, num_Processor;
+  cpu_set_t allcpuset;
+  cpu_set_t threadcpu;
+  GstElement *pipeline, *source, *encoder, *pay, *video_sink;
+  GstBus *bus;
+  GstMessage *msg;
    int rc;
     rt_max_prio = sched_get_priority_max (SCHED_FIFO);
   	rt_min_prio = sched_get_priority_min (SCHED_FIFO);
@@ -468,6 +487,44 @@ int main( int argc, char** argv )
     pthread_attr_setschedparam(&arm_act_attr,&arm_act_param);
     
   print_scheduler();
+  
+   gst_init(NULL, NULL);
+
+  /* Create the elements */
+  source = gst_element_factory_make("v4l2src", "video_src");
+  encoder = gst_element_factory_make("x264enc", "encoder");
+  pay = gst_element_factory_make("rtph264pay", "pay");
+  video_sink = gst_element_factory_make("udpsink", "video_sink");
+
+
+  pipeline = gst_pipeline_new("my_pipeline");
+
+  if(!pipeline || !source || !encoder || !pay || !video_sink)
+  {
+    g_printerr("Not all elements could be created. \n");
+    //return -1;
+  }
+
+  g_object_set(G_OBJECT(source), "device", "/dev/video1", NULL);
+  g_object_set(G_OBJECT(encoder), "tune", 4, "threads", 1, NULL);
+  g_object_set(G_OBJECT(pay), "config-interval", 2, NULL);
+  g_object_set(G_OBJECT(video_sink), "host", "10.0.0.114", "port", 5000, NULL);
+
+  /* Add message handler */
+  bus = gst_pipeline_get_bus(GST_PIPELINE(pipeline));
+
+  /* Add element into the pipeline */
+  gst_bin_add_many(GST_BIN(pipeline), source, encoder, pay, video_sink, NULL);
+
+  /* Link the element together */
+  gst_element_link_many(source, encoder, pay, video_sink, NULL);
+
+  /* Set the pipeline to PLAYING state */
+  gst_element_set_state(pipeline, GST_STATE_PLAYING);
+
+  //pthread_attr_getaffinity_np(&streaming_sched_attr, sizeof(cpu_set_t), &cpu);
+
+  g_printerr("Start...\n");
 
   // Spawn Threads
   rc = pthread_create(&capture_thread,&capture_sched_attr,frame_capture ,NULL);
